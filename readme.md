@@ -1,8 +1,8 @@
-# ViT$^3$: Unlocking Test-Time Training in Vision
+# $\text{ViT}^3$: Unlocking Test-Time Training in Vision
 
-This repo contains the official PyTorch code and pre-trained models for **Vision Test-Time Training (ViT$^3)**.
+This repo contains the official PyTorch code and pre-trained models for **Vision Test-Time Training ($\text{ViT}^3$)**.
 
-+ [ViT$^3$: Unlocking Test-Time Training in Vision](https://arxiv.org/abs/2512.01643)
++ $\text{ViT}^3$: [Unlocking Test-Time Training in Vision](https://arxiv.org/abs/2512.01643)
 
 **Code will be released in a few days.**
 
