@@ -111,3 +111,6 @@ clean_ckp.py
 *.pth
 
 .DS_Store
+
+# uv
+uv.lock

@@ -16,7 +16,7 @@ def load_checkpoint(config, model, optimizer, lr_scheduler, logger):
         checkpoint = torch.hub.load_state_dict_from_url(
             config.MODEL.RESUME, map_location='cpu', check_hash=True)
     else:
-        checkpoint = torch.load(config.MODEL.RESUME, map_location='cpu')
+        checkpoint = torch.load(config.MODEL.RESUME, map_location='cpu', weights_only=False)
     msg = model.load_state_dict(checkpoint['model'], strict=False)
     logger.info(msg)
     max_accuracy = 0.0
@@ -37,7 +37,7 @@ def load_checkpoint(config, model, optimizer, lr_scheduler, logger):
 
 def load_pretrained(ckpt_path, model, logger):
     logger.info(f"==============> Loading pretrained form {ckpt_path}....................")
-    checkpoint = torch.load(ckpt_path, map_location='cpu')
+    checkpoint = torch.load(ckpt_path, map_location='cpu', weights_only=False)
     # msg = model.load_pretrained(checkpoint['model'])
     # logger.info(msg)
     # logger.info(f"=> Loaded successfully {ckpt_path} ")
