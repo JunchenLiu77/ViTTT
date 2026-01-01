@@ -102,6 +102,16 @@ class TTT(nn.Module):
 
             g1 = 0.5 * (k_g1 + q_g1)
             g2 = 0.5 * (k_g2 + q_g2)
+        elif self.loss_type == "design2":
+            # update: MLP(0.5*q + 0.5*k) -> v, dot product loss
+            mlp_input = 0.5 * (q + k)
+            z1 = mlp_input @ w1
+            z2 = mlp_input @ w2
+            sig = F.sigmoid(z2)
+            a = z2 * sig
+            e = - v / float(v.shape[2]) * self.scale
+            g1 = mlp_input.transpose(-2, -1) @ (e * a)
+            g2 = mlp_input.transpose(-2, -1) @ (e * z1 * (sig * (1.0 + z2 * (1.0 - sig))))
         else:
             raise NotImplementedError
 
@@ -155,6 +165,8 @@ class TTT(nn.Module):
                         k_dot = (k[:, :, ys: ys + H, xs: xs + W] * e).sum(dim=(-2, -1))
                         q_dot = (q[:, :, ys: ys + H, xs: xs + W] * e).sum(dim=(-2, -1))
                         dot = 0.5 * (k_dot + q_dot)
+                    elif self.loss_type == "design2":
+                        dot = 0.5 * ((k[:, :, ys: ys + H, xs: xs + W] + q[:, :, ys: ys + H, xs: xs + W]) * e).sum(dim=(-2, -1))
                     else:
                         raise NotImplementedError
                     outs.append(dot)
@@ -203,7 +215,7 @@ class TTT(nn.Module):
             x1 = x1.transpose(1, 2).reshape(b, n, c)
             x2 = F.conv2d(q2.reshape(1, b * d, h, w), w3, padding=1, groups=b * d)
             x2 = x2.reshape(b, d, n).transpose(1, 2)
-        elif self.loss_type == "design1":
+        elif self.loss_type in ["design1", "design2"]:
             # apply: o = MLP(0.5*q + 0.5*k)
             mlp_input = 0.5 * (q1 + k1)
             x1 = (mlp_input @ w1) * F.silu(mlp_input @ w2)
