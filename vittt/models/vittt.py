@@ -180,11 +180,11 @@ default_cfgs = {
 class Block(nn.Module):
 
     def __init__(self, dim, num_heads, mlp_ratio=4., qkv_bias=False, drop=0., attn_drop=0.,
-                 drop_path=0., act_layer=nn.GELU, norm_layer=nn.LayerNorm):
+                 drop_path=0., act_layer=nn.GELU, norm_layer=nn.LayerNorm, ttt_loss_type='dot_product'):
         super().__init__()
         self.cpe = nn.Conv2d(dim, dim, kernel_size=3, padding=1, groups=dim)
         self.norm1 = norm_layer(dim)
-        self.attn = TTT(dim, num_heads=num_heads, qkv_bias=qkv_bias)
+        self.attn = TTT(dim, num_heads=num_heads, qkv_bias=qkv_bias, loss_type=ttt_loss_type)
         # NOTE: drop path for stochastic depth, we shall see if this is better than dropout here
         self.drop_path = DropPath(drop_path) if drop_path > 0. else nn.Identity()
         self.norm2 = norm_layer(dim)
@@ -213,7 +213,7 @@ class VisionTransformer(nn.Module):
     def __init__(self, img_size=224, patch_size=16, in_chans=3, num_classes=1000, embed_dim=768, depth=12,
                  num_heads=12, mlp_ratio=4., qkv_bias=True, representation_size=None, distilled=False,
                  drop_rate=0., attn_drop_rate=0., drop_path_rate=0., embed_layer=PatchEmbed, norm_layer=None,
-                 act_layer=None, weight_init=''):
+                 act_layer=None, weight_init='', ttt_loss_type='dot_product'):
         """
         Args:
             img_size (int, tuple): input image size
@@ -248,7 +248,8 @@ class VisionTransformer(nn.Module):
         self.blocks = nn.Sequential(*[
             Block(
                 dim=embed_dim, num_heads=num_heads, mlp_ratio=mlp_ratio, qkv_bias=qkv_bias, drop=drop_rate,
-                attn_drop=attn_drop_rate, drop_path=dpr[i], norm_layer=norm_layer, act_layer=act_layer)
+                attn_drop=attn_drop_rate, drop_path=dpr[i], norm_layer=norm_layer, act_layer=act_layer,
+                ttt_loss_type=ttt_loss_type)
             for i in range(depth)])
         self.norm = norm_layer(embed_dim)
 
@@ -497,30 +498,30 @@ def _create_vision_transformer(variant, pretrained=False, default_cfg=None, **kw
 
 
 @register_model
-def vittt_tiny(pretrained=False, **kwargs):
+def vittt_tiny(pretrained=False, ttt_loss_type='dot_product', **kwargs):
     """ DeiT-tiny model @ 224x224 from paper (https://arxiv.org/abs/2012.12877).
     ImageNet-1k weights from https://github.com/facebookresearch/deit.
     """
-    model_kwargs = dict(patch_size=16, embed_dim=192, depth=12, num_heads=6, **kwargs)
+    model_kwargs = dict(patch_size=16, embed_dim=192, depth=12, num_heads=6, ttt_loss_type=ttt_loss_type, **kwargs)
     model = _create_vision_transformer('deit_tiny_patch16_224', pretrained=pretrained, **model_kwargs)
     return model
 
 
 @register_model
-def vittt_small(pretrained=False, **kwargs):
+def vittt_small(pretrained=False, ttt_loss_type='dot_product', **kwargs):
     """ DeiT-small model @ 224x224 from paper (https://arxiv.org/abs/2012.12877).
     ImageNet-1k weights from https://github.com/facebookresearch/deit.
     """
-    model_kwargs = dict(patch_size=16, embed_dim=384, depth=12, num_heads=6, **kwargs)
+    model_kwargs = dict(patch_size=16, embed_dim=384, depth=12, num_heads=6, ttt_loss_type=ttt_loss_type, **kwargs)
     model = _create_vision_transformer('deit_small_patch16_224', pretrained=pretrained, **model_kwargs)
     return model
 
 
 @register_model
-def vittt_base(pretrained=False, **kwargs):
+def vittt_base(pretrained=False, ttt_loss_type='dot_product', **kwargs):
     """ DeiT base model @ 224x224 from paper (https://arxiv.org/abs/2012.12877).
     ImageNet-1k weights from https://github.com/facebookresearch/deit.
     """
-    model_kwargs = dict(patch_size=16, embed_dim=768, depth=12, num_heads=12, **kwargs)
+    model_kwargs = dict(patch_size=16, embed_dim=768, depth=12, num_heads=12, ttt_loss_type=ttt_loss_type, **kwargs)
     model = _create_vision_transformer('deit_base_patch16_224', pretrained=pretrained, **model_kwargs)
     return model

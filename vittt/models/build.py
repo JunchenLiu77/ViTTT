@@ -14,13 +14,21 @@ from .h_vittt import h_vittt_tiny, h_vittt_small, h_vittt_base
 
 def build_model(config):
     model_type = config.MODEL.TYPE
+    ttt_loss_type = getattr(config.MODEL, 'TTT_LOSS_TYPE', 'dot_product')
+    
     if model_type in ['vittt_tiny', 'vittt_small', 'vittt_base']:
-        model = eval(model_type + '(img_size=config.DATA.IMG_SIZE,'
-                                  'drop_path_rate=config.MODEL.DROP_PATH_RATE)')
+        model = eval(model_type)(
+            img_size=config.DATA.IMG_SIZE,
+            drop_path_rate=config.MODEL.DROP_PATH_RATE,
+            ttt_loss_type=ttt_loss_type,
+        )
 
     elif model_type in ['h_vittt_tiny', 'h_vittt_small', 'h_vittt_base']:
-        model = eval(model_type + '(drop_path_rate=config.MODEL.DROP_PATH_RATE,'
-                                  'use_checkpoint=config.TRAIN.USE_CHECKPOINT)')
+        model = eval(model_type)(
+            drop_path_rate=config.MODEL.DROP_PATH_RATE,
+            use_checkpoint=config.TRAIN.USE_CHECKPOINT,
+            ttt_loss_type=ttt_loss_type,
+        )
 
     else:
         raise NotImplementedError(f"Unkown model: {model_type}")

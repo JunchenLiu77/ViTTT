@@ -29,12 +29,14 @@ class TTT(nn.Module):
         qkv_bias (bool, optional):  If True, add a learnable bias to query, key, value. Default: True
     """
 
-    def __init__(self, dim, num_heads, qkv_bias=True, **kwargs):
+    def __init__(self, dim, num_heads, qkv_bias=True, loss_type="dot_product", **kwargs):
 
         super().__init__()
         head_dim = dim // num_heads
         self.dim = dim
         self.num_heads = num_heads
+        self.loss_type = loss_type
+        print(f"Loss type: {self.loss_type}")
 
         self.qkv = nn.Linear(dim, dim * 3 + head_dim * 3, bias=qkv_bias)
         self.w1 = nn.Parameter(torch.zeros(1, self.num_heads, head_dim, head_dim))
@@ -51,9 +53,10 @@ class TTT(nn.Module):
         # We used this equivalent_head_dim to compute self.scale in our earlier experiments
         # Using self.scale=head_dim**-0.5 (head_dim of simplified SwiGLU branch) leads to similar performance
 
-    def inner_train_simplified_swiglu(self, k, v, w1, w2, lr=1.0):
+    def inner_train_simplified_swiglu(self, q, k, v, w1, w2, lr=1.0):
         """
         Args:
+            q (torch.Tensor): Query tensor of shape [B, num_heads, N, head_dim]
             k (torch.Tensor): Key tensor of shape [B, num_heads, N, head_dim]
             v (torch.Tensor): Value tensor of shape [B, num_heads, N, head_dim]
             w1 (torch.Tensor): First weight matrix of shape [1, num_heads, head_dim, head_dim]
@@ -63,21 +66,44 @@ class TTT(nn.Module):
         Returns:
             tuple: Updated w1 and w2
         """
-        # --- Forward ---
-        z1 = k @ w1
-        z2 = k @ w2
-        sig = F.sigmoid(z2)
-        a = z2 * sig
-        # v_hat = a
-        # l = (v_hat * v).sum(dim=3).mean(dim=2) * self.scale
-        # Notably, v_hat and l are not computed here because
-        # they are unnecessary for deriving the gradient expression below.
-        # We directly compute e = dl/dv_hat for the backward pass.
+        if self.loss_type == "dot_product":
+            # --- Forward ---
+            z1 = k @ w1
+            z2 = k @ w2
+            sig = F.sigmoid(z2)
+            a = z2 * sig
+            # v_hat = a
+            # l = (v_hat * v).sum(dim=3).mean(dim=2) * self.scale
+            # Notably, v_hat and l are not computed here because
+            # they are unnecessary for deriving the gradient expression below.
+            # We directly compute e = dl/dv_hat for the backward pass.
 
-        # --- Backward ---
-        e = - v / float(v.shape[2]) * self.scale
-        g1 = k.transpose(-2, -1) @ (e * a)
-        g2 = k.transpose(-2, -1) @ (e * z1 * (sig * (1.0 + z2 * (1.0 - sig))))
+            # --- Backward ---
+            e = - v / float(v.shape[2]) * self.scale
+            g1 = k.transpose(-2, -1) @ (e * a)
+            g2 = k.transpose(-2, -1) @ (e * z1 * (sig * (1.0 + z2 * (1.0 - sig))))
+        elif self.loss_type == "design1":
+            # update: 0.5 * (MLP(k) + MLP(q)) -> v, dot product loss
+            k_z1 = k @ w1
+            k_z2 = k @ w2
+            k_sig = F.sigmoid(k_z2)
+            k_a = k_z2 * k_sig
+            k_e = -v / float(v.shape[2]) * self.scale
+            k_g1 = k.transpose(-2, -1) @ (k_e * k_a)
+            k_g2 = k.transpose(-2, -1) @ (k_e * k_z1 * (k_sig * (1.0 + k_z2 * (1.0 - k_sig))))
+
+            q_z1 = q @ w1
+            q_z2 = q @ w2
+            q_sig = F.sigmoid(q_z2)
+            q_a = q_z2 * q_sig
+            q_e = -v / float(v.shape[2]) * self.scale
+            q_g1 = q.transpose(-2, -1) @ (q_e * q_a)
+            q_g2 = q.transpose(-2, -1) @ (q_e * q_z1 * (q_sig * (1.0 + q_z2 * (1.0 - q_sig))))
+
+            g1 = 0.5 * (k_g1 + q_g1)
+            g2 = 0.5 * (k_g2 + q_g2)
+        else:
+            raise NotImplementedError
 
         # --- Clip gradient (for stability) ---
         g1 = g1 / (g1.norm(dim=-2, keepdim=True) + 1.0)
@@ -87,9 +113,10 @@ class TTT(nn.Module):
         w1, w2 = w1 - lr * g1, w2 - lr * g2
         return w1, w2
 
-    def inner_train_3x3dwc(self, k, v, w, lr=1.0, implementation='prod'):
+    def inner_train_3x3dwc(self, q, k, v, w, lr=1.0, implementation='prod'):
         """
         Args:
+            q (torch.Tensor): Spatial query tensor of shape [B, C, H, W]
             k (torch.Tensor): Spatial key tensor of shape [B, C, H, W]
             v (torch.Tensor): Spatial value tensor of shape [B, C, H, W]
             w (torch.Tensor): 3x3 convolution weights of shape [C, 1, 3, 3]
@@ -111,16 +138,25 @@ class TTT(nn.Module):
         B, C, H, W = k.shape
         e = - v / float(v.shape[2] * v.shape[3]) * self.scale
         if implementation == 'conv':
+            assert self.loss_type == "dot_product", "only dot_product loss is supported for conv implementation"
             g = F.conv2d(k.reshape(1, B * C, H, W), e.reshape(B * C, 1, H, W), padding=1, groups=B * C)
             g = g.transpose(0, 1)
         elif implementation == 'prod':
             k = F.pad(k, (1, 1, 1, 1))
+            q = F.pad(q, (1, 1, 1, 1))
             outs = []
             for dy in (-1, 0, 1):
                 for dx in (-1, 0, 1):
                     ys = 1 + dy
                     xs = 1 + dx
-                    dot = (k[:, :, ys: ys + H, xs: xs + W] * e).sum(dim=(-2, -1))
+                    if self.loss_type == "dot_product":
+                        dot = (k[:, :, ys: ys + H, xs: xs + W] * e).sum(dim=(-2, -1))
+                    elif self.loss_type == "design1":
+                        k_dot = (k[:, :, ys: ys + H, xs: xs + W] * e).sum(dim=(-2, -1))
+                        q_dot = (q[:, :, ys: ys + H, xs: xs + W] * e).sum(dim=(-2, -1))
+                        dot = 0.5 * (k_dot + q_dot)
+                    else:
+                        raise NotImplementedError
                     outs.append(dot)
             g = torch.stack(outs, dim=-1).reshape(B * C, 1, 3, 3)
         else:
@@ -158,14 +194,25 @@ class TTT(nn.Module):
         v2 = v2.reshape(b, h, w, d).permute(0, 3, 1, 2)
 
         # Inner training using (k, v)
-        w1, w2 = self.inner_train_simplified_swiglu(k1, v1, self.w1, self.w2)
-        w3 = self.inner_train_3x3dwc(k2, v2, self.w3, implementation='prod')
+        w1, w2 = self.inner_train_simplified_swiglu(q1, k1, v1, self.w1, self.w2)
+        w3 = self.inner_train_3x3dwc(q2, k2, v2, self.w3, implementation='prod')
 
         # Apply updated inner module to q
-        x1 = (q1 @ w1) * F.silu(q1 @ w2)
-        x1 = x1.transpose(1, 2).reshape(b, n, c)
-        x2 = F.conv2d(q2.reshape(1, b * d, h, w), w3, padding=1, groups=b * d)
-        x2 = x2.reshape(b, d, n).transpose(1, 2)
+        if self.loss_type == "dot_product":
+            x1 = (q1 @ w1) * F.silu(q1 @ w2)
+            x1 = x1.transpose(1, 2).reshape(b, n, c)
+            x2 = F.conv2d(q2.reshape(1, b * d, h, w), w3, padding=1, groups=b * d)
+            x2 = x2.reshape(b, d, n).transpose(1, 2)
+        elif self.loss_type == "design1":
+            # apply: o = MLP(0.5*q + 0.5*k)
+            mlp_input = 0.5 * (q1 + k1)
+            x1 = (mlp_input @ w1) * F.silu(mlp_input @ w2)
+            x1 = x1.transpose(1, 2).reshape(b, n, c)
+            conv_input = 0.5 * (q2 + k2)
+            x2 = F.conv2d(conv_input.reshape(1, b * d, h, w), w3, padding=1, groups=b * d)
+            x2 = x2.reshape(b, d, n).transpose(1, 2)
+        else:
+            raise NotImplementedError
 
         # Output proj
         x = torch.cat([x1, x2], dim=-1)

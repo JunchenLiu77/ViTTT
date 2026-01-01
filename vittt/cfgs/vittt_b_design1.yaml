@@ -1,0 +1,6 @@
+MODEL:
+  TYPE: vittt_base
+  NAME: vittt_base_design1
+  DROP_PATH_RATE: 0.4
+  TTT_LOSS_TYPE: design1
+

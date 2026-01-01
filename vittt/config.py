@@ -55,6 +55,8 @@ _C.MODEL.RESUME = ''
 _C.MODEL.DROP_PATH_RATE = 0.1
 # Label Smoothing
 _C.MODEL.LABEL_SMOOTHING = 0.1
+# TTT loss type ('dot_product' or 'design1')
+_C.MODEL.TTT_LOSS_TYPE = 'dot_product'
 
 # -----------------------------------------------------------------------------
 # Training settings

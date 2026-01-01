@@ -111,7 +111,7 @@ class TTTBlock(nn.Module):
     """
 
     def __init__(self, dim, input_resolution, num_heads, mlp_ratio=4., qkv_bias=True, drop=0., drop_path=0.,
-                 act_layer=nn.GELU, norm_layer=nn.LayerNorm, **kwargs):
+                 act_layer=nn.GELU, norm_layer=nn.LayerNorm, ttt_loss_type='dot_product', **kwargs):
         super().__init__()
         self.dim = dim
         self.input_resolution = input_resolution
@@ -121,7 +121,7 @@ class TTTBlock(nn.Module):
         self.cpe = nn.Conv2d(dim, dim, 3, padding=1, groups=dim)
         self.norm1 = norm_layer(dim)
         self.rope = RoPE(shape=(input_resolution[0], input_resolution[1], dim))
-        self.attn = TTT(dim=dim, num_heads=num_heads, qkv_bias=qkv_bias)
+        self.attn = TTT(dim=dim, num_heads=num_heads, qkv_bias=qkv_bias, loss_type=ttt_loss_type)
         self.drop_path = DropPath(drop_path) if drop_path > 0. else nn.Identity()
 
         self.norm2 = norm_layer(dim)
@@ -197,7 +197,7 @@ class BasicLayer(nn.Module):
     """
 
     def __init__(self, dim, dim_out, input_resolution, depth, num_heads, mlp_ratio=4., qkv_bias=True, drop=0.,
-                 drop_path=0., norm_layer=nn.LayerNorm, downsample=None, use_checkpoint=False):
+                 drop_path=0., norm_layer=nn.LayerNorm, downsample=None, use_checkpoint=False, ttt_loss_type='dot_product'):
 
         super().__init__()
         self.dim = dim
@@ -209,7 +209,8 @@ class BasicLayer(nn.Module):
         self.blocks = nn.ModuleList([
             TTTBlock(dim=dim, input_resolution=input_resolution, num_heads=num_heads,
                      mlp_ratio=mlp_ratio, qkv_bias=qkv_bias, drop=drop,
-                     drop_path=drop_path[i] if isinstance(drop_path, list) else drop_path, norm_layer=norm_layer)
+                     drop_path=drop_path[i] if isinstance(drop_path, list) else drop_path, norm_layer=norm_layer,
+                     ttt_loss_type=ttt_loss_type)
             for i in range(depth)])
 
         # patch merging layer
@@ -286,7 +287,7 @@ class ViTTT(nn.Module):
     def __init__(self, img_size=224, patch_size=4, in_chans=3, num_classes=1000,
                  dim=[96, 192, 384, 768], depths=[2, 2, 6, 2], num_heads=[3, 6, 12, 24],
                  mlp_ratio=4., qkv_bias=True, drop_rate=0., drop_path_rate=0.1,
-                 norm_layer=nn.LayerNorm, use_checkpoint=False, **kwargs):
+                 norm_layer=nn.LayerNorm, use_checkpoint=False, ttt_loss_type='dot_product', **kwargs):
         super().__init__()
         self.num_classes = num_classes
         self.num_layers = len(depths)
@@ -316,7 +317,8 @@ class ViTTT(nn.Module):
                                drop_path=dpr[sum(depths[:i_layer]):sum(depths[:i_layer + 1])],
                                norm_layer=norm_layer,
                                downsample=PatchMerging if (i_layer < self.num_layers - 1) else None,
-                               use_checkpoint=use_checkpoint)
+                               use_checkpoint=use_checkpoint,
+                               ttt_loss_type=ttt_loss_type)
             self.layers.append(layer)
 
         self.norm = nn.BatchNorm1d(dim[-1])
@@ -354,16 +356,16 @@ class ViTTT(nn.Module):
         return x
 
 
-def h_vittt_tiny(**kwargs):
-    model = ViTTT(dim=[64, 128, 320, 512], depths=[1, 3, 9, 4], num_heads=[2, 4, 10, 16], **kwargs)
+def h_vittt_tiny(ttt_loss_type='dot_product', **kwargs):
+    model = ViTTT(dim=[64, 128, 320, 512], depths=[1, 3, 9, 4], num_heads=[2, 4, 10, 16], ttt_loss_type=ttt_loss_type, **kwargs)
     return model
 
 
-def h_vittt_small(**kwargs):
-    model = ViTTT(dim=[64, 128, 320, 512], depths=[2, 6, 18, 8], num_heads=[2, 4, 10, 16], **kwargs)
+def h_vittt_small(ttt_loss_type='dot_product', **kwargs):
+    model = ViTTT(dim=[64, 128, 320, 512], depths=[2, 6, 18, 8], num_heads=[2, 4, 10, 16], ttt_loss_type=ttt_loss_type, **kwargs)
     return model
 
 
-def h_vittt_base(**kwargs):
-    model = ViTTT(dim=[96, 192, 448, 640], depths=[2, 6, 18, 8], num_heads=[3, 6, 14, 20], **kwargs)
+def h_vittt_base(ttt_loss_type='dot_product', **kwargs):
+    model = ViTTT(dim=[96, 192, 448, 640], depths=[2, 6, 18, 8], num_heads=[3, 6, 14, 20], ttt_loss_type=ttt_loss_type, **kwargs)
     return model
