@@ -66,7 +66,7 @@ class TTT(nn.Module):
         Returns:
             tuple: Updated w1 and w2
         """
-        if self.loss_type == "dot_product":
+        if self.loss_type in ["dot_product", "no_query_dot_product"]:
             # --- Forward ---
             z1 = k @ w1
             z2 = k @ w2
@@ -80,6 +80,35 @@ class TTT(nn.Module):
 
             # --- Backward ---
             e = - v / float(v.shape[2]) * self.scale
+            g1 = k.transpose(-2, -1) @ (e * a)
+            g2 = k.transpose(-2, -1) @ (e * z1 * (sig * (1.0 + z2 * (1.0 - sig))))
+        elif self.loss_type == "ga_dot_product":
+            # --- Forward ---
+            z1 = k @ w1
+            z2 = k @ w2
+            sig = F.sigmoid(z2)
+            a = z2 * sig
+            # v_hat = a
+            # l = (v_hat * v).sum(dim=3).mean(dim=2) * self.scale
+            # Notably, v_hat and l are not computed here because
+            # they are unnecessary for deriving the gradient expression below.
+            # We directly compute e = dl/dv_hat for the backward pass.
+
+            # --- Backward ---
+            e = - v / float(v.shape[2]) * self.scale
+            g1 = - k.transpose(-2, -1) @ (e * a)
+            g2 = - k.transpose(-2, -1) @ (e * z1 * (sig * (1.0 + z2 * (1.0 - sig))))
+        elif self.loss_type == "mse":
+            # --- Forward ---
+            z1 = k @ w1
+            z2 = k @ w2
+            sig = F.sigmoid(z2)
+            a = z2 * sig
+            v_hat = a
+            # upstream gradient: v_hat - v
+
+            # --- Backward ---
+            e = (v_hat - v) / float(v.shape[2]) * self.scale
             g1 = k.transpose(-2, -1) @ (e * a)
             g2 = k.transpose(-2, -1) @ (e * z1 * (sig * (1.0 + z2 * (1.0 - sig))))
         elif self.loss_type == "design1":
@@ -159,16 +188,14 @@ class TTT(nn.Module):
                 for dx in (-1, 0, 1):
                     ys = 1 + dy
                     xs = 1 + dx
-                    if self.loss_type == "dot_product":
-                        dot = (k[:, :, ys: ys + H, xs: xs + W] * e).sum(dim=(-2, -1))
-                    elif self.loss_type == "design1":
+                    if self.loss_type == "design1":
                         k_dot = (k[:, :, ys: ys + H, xs: xs + W] * e).sum(dim=(-2, -1))
                         q_dot = (q[:, :, ys: ys + H, xs: xs + W] * e).sum(dim=(-2, -1))
                         dot = 0.5 * (k_dot + q_dot)
                     elif self.loss_type == "design2":
                         dot = 0.5 * ((k[:, :, ys: ys + H, xs: xs + W] + q[:, :, ys: ys + H, xs: xs + W]) * e).sum(dim=(-2, -1))
                     else:
-                        raise NotImplementedError
+                        dot = (k[:, :, ys: ys + H, xs: xs + W] * e).sum(dim=(-2, -1))
                     outs.append(dot)
             g = torch.stack(outs, dim=-1).reshape(B * C, 1, 3, 3)
         else:
@@ -210,10 +237,10 @@ class TTT(nn.Module):
         w3 = self.inner_train_3x3dwc(q2, k2, v2, self.w3, implementation='prod')
 
         # Apply updated inner module to q
-        if self.loss_type == "dot_product":
-            x1 = (q1 @ w1) * F.silu(q1 @ w2)
+        if self.loss_type == "no_query_dot_product":
+            x1 = (k1 @ w1) * F.silu(k1 @ w2)
             x1 = x1.transpose(1, 2).reshape(b, n, c)
-            x2 = F.conv2d(q2.reshape(1, b * d, h, w), w3, padding=1, groups=b * d)
+            x2 = F.conv2d(k2.reshape(1, b * d, h, w), w3, padding=1, groups=b * d)
             x2 = x2.reshape(b, d, n).transpose(1, 2)
         elif self.loss_type in ["design1", "design2"]:
             # apply: o = MLP(0.5*q + 0.5*k)
@@ -224,7 +251,10 @@ class TTT(nn.Module):
             x2 = F.conv2d(conv_input.reshape(1, b * d, h, w), w3, padding=1, groups=b * d)
             x2 = x2.reshape(b, d, n).transpose(1, 2)
         else:
-            raise NotImplementedError
+            x1 = (q1 @ w1) * F.silu(q1 @ w2)
+            x1 = x1.transpose(1, 2).reshape(b, n, c)
+            x2 = F.conv2d(q2.reshape(1, b * d, h, w), w3, padding=1, groups=b * d)
+            x2 = x2.reshape(b, d, n).transpose(1, 2)
 
         # Output proj
         x = torch.cat([x1, x2], dim=-1)
