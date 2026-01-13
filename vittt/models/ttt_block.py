@@ -111,6 +111,37 @@ class TTT(nn.Module):
             e = (v_hat - v) / float(v.shape[2]) * self.scale
             g1 = k.transpose(-2, -1) @ (e * a)
             g2 = k.transpose(-2, -1) @ (e * z1 * (sig * (1.0 + z2 * (1.0 - sig))))
+        elif self.loss_type in ["only_w1", "only_w1_no_muon"]:
+            # make the phi function fixed by only updating w1
+            # --- Forward ---
+            z1 = k @ w1
+            z2 = k @ w2
+            sig = F.sigmoid(z2)
+            a = z2 * sig
+            # v_hat = a
+            # l = (v_hat * v).sum(dim=3).mean(dim=2) * self.scale
+            # Notably, v_hat and l are not computed here because
+            # they are unnecessary for deriving the gradient expression below.
+            # We directly compute e = dl/dv_hat for the backward pass.
+
+            # --- Backward ---
+            e = - v / float(v.shape[2]) * self.scale
+            g1 = k.transpose(-2, -1) @ (e * a)
+            g2 = 0.0
+        elif self.loss_type == "only_w1_straight_qk":
+            # directly use k @ w1 as the output
+            # --- Forward ---
+            a = k @ w1
+            # v_hat = a
+            # l = (v_hat * v).sum(dim=3).mean(dim=2) * self.scale
+            # Notably, v_hat and l are not computed here because
+            # they are unnecessary for deriving the gradient expression below.
+            # We directly compute e = dl/dv_hat for the backward pass.
+
+            # --- Backward ---
+            e = - v / float(v.shape[2]) * self.scale
+            g1 = k.transpose(-2, -1) @ (e * a) + w2.sum() * 0.0
+            g2 = 0.0
         elif self.loss_type == "design1":
             # update: 0.5 * (MLP(k) + MLP(q)) -> v, dot product loss
             k_z1 = k @ w1
@@ -145,8 +176,10 @@ class TTT(nn.Module):
             raise NotImplementedError
 
         # --- Clip gradient (for stability) ---
-        g1 = g1 / (g1.norm(dim=-2, keepdim=True) + 1.0)
-        g2 = g2 / (g2.norm(dim=-2, keepdim=True) + 1.0)
+        if "no_muon" not in self.loss_type:
+            g1 = g1 / (g1.norm(dim=-2, keepdim=True) + 1.0)
+            if "only_w1" not in self.loss_type:
+                g2 = g2 / (g2.norm(dim=-2, keepdim=True) + 1.0)
 
         # --- Step ---
         w1, w2 = w1 - lr * g1, w2 - lr * g2
@@ -241,6 +274,12 @@ class TTT(nn.Module):
             x1 = (k1 @ w1) * F.silu(k1 @ w2)
             x1 = x1.transpose(1, 2).reshape(b, n, c)
             x2 = F.conv2d(k2.reshape(1, b * d, h, w), w3, padding=1, groups=b * d)
+            x2 = x2.reshape(b, d, n).transpose(1, 2)
+        elif self.loss_type == "only_w1_straight_qk":
+            # directly use q1 @ w1 as the output
+            x1 = q1 @ w1
+            x1 = x1.transpose(1, 2).reshape(b, n, c)
+            x2 = F.conv2d(q2.reshape(1, b * d, h, w), w3, padding=1, groups=b * d)
             x2 = x2.reshape(b, d, n).transpose(1, 2)
         elif self.loss_type in ["design1", "design2"]:
             # apply: o = MLP(0.5*q + 0.5*k)

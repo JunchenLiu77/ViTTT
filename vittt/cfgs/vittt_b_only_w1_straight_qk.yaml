@@ -1,0 +1,6 @@
+MODEL:
+  TYPE: vittt_base
+  NAME: vittt_base_only_w1_straight_qk
+  DROP_PATH_RATE: 0.4
+  TTT_LOSS_TYPE: only_w1_straight_qk
+

@@ -3,7 +3,7 @@
 #SBATCH --account=aip-fsanja
 #SBATCH --output=output/vittt_b_2gpu_bs512_60epoch_ga/%x_%j.out
 #SBATCH --error=output/vittt_b_2gpu_bs512_60epoch_ga/%x_%j.err
-#SBATCH --time=00-16:00:00
+#SBATCH --time=00-18:00:00
 #SBATCH --nodes=1
 #SBATCH --mem=64GB
 #SBATCH --cpus-per-task=8

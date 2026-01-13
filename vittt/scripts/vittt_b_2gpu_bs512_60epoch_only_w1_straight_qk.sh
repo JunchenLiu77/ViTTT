@@ -1,8 +1,8 @@
 #!/bin/bash
-#SBATCH --job-name=vittt_b_2gpu_bs512_60epoch
+#SBATCH --job-name=vittt_b_2gpu_bs512_60epoch_only_w1_straight_qk
 #SBATCH --account=aip-fsanja
-#SBATCH --output=output/vittt_b_2gpu_bs512_60epoch/%x_%j.out
-#SBATCH --error=output/vittt_b_2gpu_bs512_60epoch/%x_%j.err
+#SBATCH --output=output/vittt_b_2gpu_bs512_60epoch_only_w1_straight_qk/%x_%j.out
+#SBATCH --error=output/vittt_b_2gpu_bs512_60epoch_only_w1_straight_qk/%x_%j.err
 #SBATCH --time=00-18:00:00
 #SBATCH --nodes=1
 #SBATCH --mem=64GB
@@ -20,7 +20,7 @@ echo "Job ID: $SLURM_JOB_ID"
 echo "Node: $SLURMD_NODENAME"
 echo "GPUs: 2x h100"
 echo "Start time: $(date)"
-echo "Config: cfgs/vittt_b.yaml"
+echo "Config: cfgs/vittt_b_only_w1_straight_qk.yaml"
 echo "=============================================="
 
 # Load modules
@@ -55,13 +55,13 @@ srun uv run python -m torch.distributed.launch \
     --nproc_per_node=2 \
     --master_port=$MASTER_PORT \
     main.py \
-    --cfg cfgs/vittt_b.yaml \
+    --cfg cfgs/vittt_b_only_w1_straight_qk.yaml \
     --data-path ~/projects/aip-fsanja/shared/datasets/imagenet/ \
-    --output output/vittt_b_2gpu_bs512_60epoch \
+    --output output/vittt_b_2gpu_bs512_60epoch_only_w1_straight_qk \
     --batch-size 256 \
     --epochs 60 \
     --warmup-epochs 4 \
-    --wandb-run-name vittt_b_2gpu_bs512_60epoch \
+    --wandb-run-name vittt_b_2gpu_bs512_60epoch_only_w1_straight_qk \
     --amp
 
 # Restore stderr
