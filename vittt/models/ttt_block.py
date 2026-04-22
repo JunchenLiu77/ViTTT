@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
 # --------------------------------------------------------
 # ViT^3: Unlocking Test-Time Training in Vision
 # Written by Dongchen Han
@@ -29,12 +32,14 @@ class TTT(nn.Module):
         qkv_bias (bool, optional):  If True, add a learnable bias to query, key, value. Default: True
     """
 
-    def __init__(self, dim, num_heads, qkv_bias=True, **kwargs):
+    def __init__(self, dim, num_heads, qkv_bias=True, loss_type="dot_product", **kwargs):
 
         super().__init__()
         head_dim = dim // num_heads
         self.dim = dim
         self.num_heads = num_heads
+        self.loss_type = loss_type
+        print(f"Loss type: {self.loss_type}")
 
         self.qkv = nn.Linear(dim, dim * 3 + head_dim * 3, bias=qkv_bias)
         self.w1 = nn.Parameter(torch.zeros(1, self.num_heads, head_dim, head_dim))
@@ -63,25 +68,64 @@ class TTT(nn.Module):
         Returns:
             tuple: Updated w1 and w2
         """
-        # --- Forward ---
-        z1 = k @ w1
-        z2 = k @ w2
-        sig = F.sigmoid(z2)
-        a = z2 * sig
-        # v_hat = a
-        # l = (v_hat * v).sum(dim=3).mean(dim=2) * self.scale
-        # Notably, v_hat and l are not computed here because
-        # they are unnecessary for deriving the gradient expression below.
-        # We directly compute e = dl/dv_hat for the backward pass.
+        if self.loss_type in ["dot_product", "no_query_dot_product", "ga_dot_product"]:
+            # --- Forward ---
+            z1 = k @ w1
+            z2 = k @ w2
+            sig = F.sigmoid(z2)
+            a = z2 * sig
+            # v_hat = a
+            # l = (v_hat * v).sum(dim=3).mean(dim=2) * self.scale
+            # Notably, v_hat and l are not computed here because
+            # they are unnecessary for deriving the gradient expression below.
+            # We directly compute e = dl/dv_hat for the backward pass.
 
-        # --- Backward ---
-        e = - v / float(v.shape[2]) * self.scale
-        g1 = k.transpose(-2, -1) @ (e * a)
-        g2 = k.transpose(-2, -1) @ (e * z1 * (sig * (1.0 + z2 * (1.0 - sig))))
+            # --- Backward ---
+            e = - v / float(v.shape[2]) * self.scale
+            g1 = k.transpose(-2, -1) @ (e * a)
+            g2 = k.transpose(-2, -1) @ (e * z1 * (sig * (1.0 + z2 * (1.0 - sig))))
+            if "ga" in self.loss_type:
+                g1 = -g1
+                g2 = -g2
+        elif "only_w1_straight_qk" in self.loss_type:
+            # directly use k @ w1 as the output
+            # --- Forward ---
+            a = k @ w1
+            # v_hat = a
+            # l = (v_hat * v).sum(dim=3).mean(dim=2) * self.scale
+            # Notably, v_hat and l are not computed here because
+            # they are unnecessary for deriving the gradient expression below.
+            # We directly compute e = dl/dv_hat for the backward pass.
+
+            # --- Backward ---
+            e = - v / float(v.shape[2]) * self.scale
+            g1 = k.transpose(-2, -1) @ (e * a) + w2.sum() * 0.0
+            g2 = 0.0
+        elif "only_w1" in self.loss_type:
+            # make the phi function fixed by only updating w1
+            # --- Forward ---
+            z1 = k @ w1
+            z2 = k @ w2
+            sig = F.sigmoid(z2)
+            a = z2 * sig
+            # v_hat = a
+            # l = (v_hat * v).sum(dim=3).mean(dim=2) * self.scale
+            # Notably, v_hat and l are not computed here because
+            # they are unnecessary for deriving the gradient expression below.
+            # We directly compute e = dl/dv_hat for the backward pass.
+
+            # --- Backward ---
+            e = - v / float(v.shape[2]) * self.scale
+            g1 = k.transpose(-2, -1) @ (e * a)
+            g2 = 0.0
+        else:
+            raise NotImplementedError
 
         # --- Clip gradient (for stability) ---
-        g1 = g1 / (g1.norm(dim=-2, keepdim=True) + 1.0)
-        g2 = g2 / (g2.norm(dim=-2, keepdim=True) + 1.0)
+        if "no_muon" not in self.loss_type:
+            g1 = g1 / (g1.norm(dim=-2, keepdim=True) + 1.0)
+            if "only_w1" not in self.loss_type:
+                g2 = g2 / (g2.norm(dim=-2, keepdim=True) + 1.0)
 
         # --- Step ---
         w1, w2 = w1 - lr * g1, w2 - lr * g2
@@ -162,10 +206,22 @@ class TTT(nn.Module):
         w3 = self.inner_train_3x3dwc(k2, v2, self.w3, implementation='prod')
 
         # Apply updated inner module to q
-        x1 = (q1 @ w1) * F.silu(q1 @ w2)
-        x1 = x1.transpose(1, 2).reshape(b, n, c)
-        x2 = F.conv2d(q2.reshape(1, b * d, h, w), w3, padding=1, groups=b * d)
-        x2 = x2.reshape(b, d, n).transpose(1, 2)
+        if self.loss_type == "no_query_dot_product":
+            x1 = (k1 @ w1) * F.silu(k1 @ w2)
+            x1 = x1.transpose(1, 2).reshape(b, n, c)
+            x2 = F.conv2d(k2.reshape(1, b * d, h, w), w3, padding=1, groups=b * d)
+            x2 = x2.reshape(b, d, n).transpose(1, 2)
+        elif "straight_qk" in self.loss_type:
+            # directly use q1 @ w1 as the output
+            x1 = q1 @ w1
+            x1 = x1.transpose(1, 2).reshape(b, n, c)
+            x2 = F.conv2d(q2.reshape(1, b * d, h, w), w3, padding=1, groups=b * d)
+            x2 = x2.reshape(b, d, n).transpose(1, 2)
+        else:
+            x1 = (q1 @ w1) * F.silu(q1 @ w2)
+            x1 = x1.transpose(1, 2).reshape(b, n, c)
+            x2 = F.conv2d(q2.reshape(1, b * d, h, w), w3, padding=1, groups=b * d)
+            x2 = x2.reshape(b, d, n).transpose(1, 2)
 
         # Output proj
         x = torch.cat([x1, x2], dim=-1)

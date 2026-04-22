@@ -1,3 +1,40 @@
+# TTTLA -- ViTTT Experiments
+
+ViTTT experiment code for [Test-Time Training with KV Binding Is Secretly Linear Attention](https://arxiv.org/abs/2602.21204) (TTTLA).
+
+[[Project Page]](https://research.nvidia.com/labs/sil/projects/tttla/) [[Paper]](https://arxiv.org/abs/2602.21204)
+
+We show analytically that TTT architectures with key-value binding reduce to learned linear attention operators. This directory contains the ViTTT experiment implementations used in the paper, including empirical studies (Sec. 4) and the progressive reduction from TTT to linear attention (Sec. 6.1), built on top of the [ViTTT](https://arxiv.org/abs/2512.01643) codebase.
+
+## Experiments and Variants
+
+Variant configs are in `vittt/cfgs/` and controlled by the `TTT_LOSS_TYPE` field. The dispatch logic is in `vittt/models/ttt_block.py`.
+
+| Name | Config | `TTT_LOSS_TYPE` | Description |
+|------|--------|-----------------|-------------|
+| Base (ViTTT) | `vittt_b.yaml` | `dot_product` (default) | Full SwiGLU TTT with Muon |
+| GA | `vittt_b_ga.yaml` | `ga_dot_product` | Gradient ascent instead of descent (Sec. 4.2) |
+| No Query | `vittt_b_no_query.yaml` | `no_query_dot_product` | Replace query with key in output projection (Sec. 4.4) |
+| Variant 1 | `vittt_b_variant1.yaml` | `only_w1` | Update only final-layer params w1 (Sec. 6.1) |
+| Variant 3 | `vittt_b_variant3.yaml` | `only_w1_straight_qk` | Replace multi-layer MLP with single linear layer (Sec. 6.1) |
+| Variant 6 | `vittt_b_variant6.yaml` | `only_w1_straight_qk_no_muon` | Remove gradient orthogonalization, reduces to standard linear attention (Sec. 6.1) |
+
+## Launching
+
+Launch scripts are in `vittt/scripts/`. All train ViTTT-Base on ImageNet for 60 epochs with 2 GPUs. Set `$DATA_PATH` to your ImageNet directory before running.
+
+```bash
+cd vittt
+bash scripts/vittt_b_2gpu_bs512_60epoch.sh            # Base ViTTT
+bash scripts/vittt_b_2gpu_bs512_60epoch_ga.sh          # Gradient ascent
+bash scripts/vittt_b_2gpu_bs512_60epoch_no_query.sh    # No query
+bash scripts/vittt_b_2gpu_bs512_60epoch_variant1.sh    # Variant 1
+bash scripts/vittt_b_2gpu_bs512_60epoch_variant3.sh    # Variant 3
+bash scripts/vittt_b_2gpu_bs512_60epoch_variant6.sh    # Variant 6
+```
+
+---
+
 # $\text{ViT}^3$: Unlocking Test-Time Training in Vision
 
 This repo contains the official PyTorch code and pre-trained models for **Vision Test-Time Training ($\text{ViT}^3$)**.
